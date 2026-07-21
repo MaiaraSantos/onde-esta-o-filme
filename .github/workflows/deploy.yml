@@ -1,0 +1,41 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Create .env file
+        run: |
+          echo "APP_ENV=prod" > .env
+          echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
+          echo "TMDB_BASE_URL=https://api.themoviedb.org/3" >> .env
+          echo "TMDB_IMAGE_BASE_URL=https://image.tmdb.org/t/p" >> .env
+          echo "WATCHMODE_API_KEY=${{ secrets.WATCHMODE_API_KEY }}" >> .env
+          echo "WATCHMODE_BASE_URL=https://api.watchmode.com/v1" >> .env
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Web
+        run: flutter build web --release --base-href /onde-esta-o-filme/
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build/web
