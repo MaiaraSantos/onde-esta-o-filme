@@ -184,11 +184,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           Expanded(
             child: Container(
               constraints: const BoxConstraints(maxWidth: 500),
+              height: 44, // Altura padronizada
               child: TextField(
                 controller: _topSearchController,
                 onSubmitted: _onSearchSubmitted,
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
+                  isDense: true,
                   hintText: 'Pesquise por títulos ou streamings...',
                   prefixIcon: const Icon(
                     Icons.search,
@@ -197,7 +199,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 20,
-                    vertical: 12,
+                    vertical: 0, // Centralizado automaticamente pelo height
                   ),
                   fillColor: AppTheme.darkSurface,
                   filled: true,
@@ -257,53 +259,99 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               final isAnonymous = user?.isAnonymous ?? true;
 
               if (isAnonymous) {
-                return OutlinedButton.icon(
-                  onPressed: () {
-                    ref.read(authProvider.notifier).linkWithGoogle();
-                  },
-                  icon: const Icon(Icons.cloud_sync_rounded, size: 18),
-                  label: const Text('Login'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Colors.white24),
-                    padding: isDesktop
-                        ? const EdgeInsets.symmetric(horizontal: 16, vertical: 12)
-                        : const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                return SizedBox(
+                  height: 44, // Altura padronizada
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      ref.read(authProvider.notifier).linkWithGoogle();
+                    },
+                    icon: const Icon(Icons.cloud_sync_rounded, size: 18),
+                    label: const Text('Login'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white24),
+                      padding: isDesktop
+                          ? const EdgeInsets.symmetric(horizontal: 16)
+                          : const EdgeInsets.symmetric(horizontal: 12),
+                    ),
                   ),
                 );
               } else {
-                return PopupMenuButton<String>(
-                  tooltip: 'Sua conta Google',
-                  onSelected: (val) {
-                    if (val == 'logout') {
-                      ref.read(authProvider.notifier).signOut();
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    PopupMenuItem(
-                      enabled: false,
-                      child: Text(
-                        user?.email ?? 'Usuário',
-                        style: const TextStyle(color: Colors.white70),
+                return SizedBox(
+                  height: 44, // Altura padronizada
+                  child: Material(
+                    color: Colors.transparent,
+                    shape: const StadiumBorder(
+                      side: BorderSide(color: Colors.white24),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: PopupMenuButton<String>(
+                      tooltip: 'Sua conta Google',
+                      color: AppTheme.darkSurface,
+                      elevation: 8,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        side: BorderSide(color: Colors.white.withOpacity(0.05)),
                       ),
-                    ),
-                    const PopupMenuDivider(),
-                    const PopupMenuItem(
-                      value: 'logout',
-                      child: Text('Sair', style: TextStyle(color: Colors.redAccent)),
-                    ),
-                  ],
-                  child: CircleAvatar(
-                    radius: 18,
-                    backgroundColor: AppTheme.primaryColor.withOpacity(0.2),
-                    backgroundImage: user?.photoURL != null
-                        ? CachedNetworkImageProvider(user!.photoURL!)
-                        : null,
-                    child: user?.photoURL == null
-                        ? const Icon(Icons.person, color: AppTheme.primaryColor)
-                        : null,
-                  ),
-                );
+                      offset: const Offset(0, 50),
+                      onSelected: (val) {
+                        if (val == 'logout') {
+                          ref.read(authProvider.notifier).signOut();
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        PopupMenuItem(
+                          enabled: false,
+                          height: 40,
+                          child: Text(
+                            user?.email ?? 'Usuário',
+                            style: const TextStyle(color: Colors.white70, fontSize: 14),
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'logout',
+                          height: 40,
+                          child: Row(
+                            children: [
+                              Icon(Icons.logout, color: AppTheme.primaryColor, size: 18),
+                              SizedBox(width: 8),
+                              Text('Sair', style: TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ],
+                      child: Padding(
+                        padding: isDesktop
+                            ? const EdgeInsets.symmetric(horizontal: 16)
+                            : const EdgeInsets.symmetric(horizontal: 12),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircleAvatar(
+                            radius: 14,
+                            backgroundColor: AppTheme.primaryColor.withOpacity(0.2),
+                            backgroundImage: user?.photoURL != null
+                                ? CachedNetworkImageProvider(user!.photoURL!)
+                                : null,
+                            child: user?.photoURL == null
+                                ? const Icon(Icons.person, color: AppTheme.primaryColor, size: 16)
+                                : null,
+                          ),
+                          if (isDesktop) ...[
+                            const SizedBox(width: 8),
+                            Text(
+                              user?.displayName?.split(' ').first ?? 'Minha Conta',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.arrow_drop_down, color: Colors.white70, size: 18),
+                          ],
+                        ],
+                      ), // Fecha Row
+                    ), // Fecha Padding
+                  ), // Fecha PopupMenuButton
+                ), // Fecha Material
+                ); // Fecha SizedBox
               }
             },
           ),
