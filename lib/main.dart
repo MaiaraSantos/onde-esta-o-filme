@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'config/app_config.dart';
 import 'config/router.dart';
 import 'providers/repository_providers.dart';
 import 'theme/app_theme.dart';
+import 'firebase_options.dart';
 
 void main() async {
   // Garante inicialização das bindings do Flutter
@@ -13,6 +15,11 @@ void main() async {
 
   // Inicializa configuração de ambiente (.env)
   await AppConfig.initialize();
+
+  // Inicializa Firebase
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   // Inicializa preferências locais para watchlist persistida
   final SharedPreferences prefs = await SharedPreferences.getInstance();

@@ -14,6 +14,7 @@ import '../widgets/logo_widget.dart';
 import '../widgets/rating_widget.dart';
 import '../widgets/streaming_badge.dart';
 import '../theme/app_theme.dart';
+import '../providers/auth_provider.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   final String? initialQuery;
@@ -232,8 +233,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           const SizedBox(width: 16),
 
-          // Botão Quero Assistir no topo no Mobile/Tablet (Apenas atalho rápido)
-          if (!isDesktop)
+            // Botão Quero Assistir no topo no Mobile/Tablet (Apenas atalho rápido)
+          if (!isDesktop) ...[
             IconButton(
               icon: Badge(
                 label: Text('$watchlistCount'),
@@ -246,6 +247,66 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 });
               },
             ),
+            const SizedBox(width: 8),
+          ],
+          
+          // Botão de Perfil/Login com Google
+          Consumer(
+            builder: (context, ref, child) {
+              final user = ref.watch(authProvider);
+              final isAnonymous = user?.isAnonymous ?? true;
+
+              if (isAnonymous) {
+                return OutlinedButton.icon(
+                  onPressed: () {
+                    ref.read(authProvider.notifier).linkWithGoogle();
+                  },
+                  icon: const Icon(Icons.cloud_sync_rounded, size: 18),
+                  label: const Text('Login'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white24),
+                    padding: isDesktop
+                        ? const EdgeInsets.symmetric(horizontal: 16, vertical: 12)
+                        : const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  ),
+                );
+              } else {
+                return PopupMenuButton<String>(
+                  tooltip: 'Sua conta Google',
+                  onSelected: (val) {
+                    if (val == 'logout') {
+                      ref.read(authProvider.notifier).signOut();
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      enabled: false,
+                      child: Text(
+                        user?.email ?? 'Usuário',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
+                      value: 'logout',
+                      child: Text('Sair', style: TextStyle(color: Colors.redAccent)),
+                    ),
+                  ],
+                  child: CircleAvatar(
+                    radius: 18,
+                    backgroundColor: AppTheme.primaryColor.withOpacity(0.2),
+                    backgroundImage: user?.photoURL != null
+                        ? CachedNetworkImageProvider(user!.photoURL!)
+                        : null,
+                    child: user?.photoURL == null
+                        ? const Icon(Icons.person, color: AppTheme.primaryColor)
+                        : null,
+                  ),
+                );
+              }
+            },
+          ),
         ],
       ),
     );
