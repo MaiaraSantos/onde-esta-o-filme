@@ -54,8 +54,14 @@ class ApiMediaRepository implements MediaRepository {
       if (type != null) {
         items = items.where((item) => item.type == type).toList();
       }
-      if (genres != null && genres.isNotEmpty) {
-        items = items.where((item) => genres.every((g) => item.genres.contains(g))).toList();
+      // Filtro Nacionais na busca por texto: filtra por idioma original português
+      final isNacionalSearch = genres != null && genres.contains('Nacionais');
+      if (isNacionalSearch) {
+        items = items.where((item) => item.originalLanguage == 'pt').toList();
+      }
+      final genresSemNacionalSearch = genres?.where((g) => g != 'Nacionais').toList();
+      if (genresSemNacionalSearch != null && genresSemNacionalSearch.isNotEmpty) {
+        items = items.where((item) => genresSemNacionalSearch.every((g) => item.genres.contains(g))).toList();
       }
       
       // Ordenação local
@@ -67,11 +73,25 @@ class ApiMediaRepository implements MediaRepository {
     }
     
     // 2. Discover (Sem Busca por texto)
-    final params = <String, String>{};
+    final params = <String, String>{
+      // Piso de qualidade: evita "sujeira" na listagem
+      'vote_count.gte': '100',
+      'vote_average.gte': '6.5',
+    };
     
+    // Filtro especial: Nacionais (produções brasileiras)
+    final isNacional = genres != null && genres.contains('Nacionais');
+    if (isNacional) {
+      params['with_origin_country'] = 'BR';
+      // Nacionais exige nota mínima maior para mostrar apenas produções relevantes
+      params['vote_average.gte'] = '7.0';
+      params['vote_count.gte'] = '50';
+    }
+
     // Gêneros
-    if (genres != null && genres.isNotEmpty) {
-      final genreIds = genres.map((g) => _genreNameToId[g]).where((id) => id != null).join(',');
+    final genresSemNacional = genres?.where((g) => g != 'Nacionais').toList();
+    if (genresSemNacional != null && genresSemNacional.isNotEmpty) {
+      final genreIds = genresSemNacional.map((g) => _genreNameToId[g]).where((id) => id != null).join(',');
       if (genreIds.isNotEmpty) {
         params['with_genres'] = genreIds;
       }
@@ -102,9 +122,17 @@ class ApiMediaRepository implements MediaRepository {
       }
     }
 
+    // Tipos de TV permitidos: 0=Documentário, 2=Minissérie, 4=Seriado (exclui noticiário, reality, talk show)
+    // without_genres=10766 exclui Soap/Novela
+    const tvTypeFilter = '0|2|4';
+
     if (type == null) {
+      final tvParams = Map<String, String>.from(params)
+        ..['with_type'] = tvTypeFilter
+        ..['without_genres'] = '10766'; // Exclui Novela/Soap
+
       final movieResults = await _tmdbService.discover(type: 'movie', params: params);
-      final tvResults = await _tmdbService.discover(type: 'tv', params: params);
+      final tvResults = await _tmdbService.discover(type: 'tv', params: tvParams);
       
       var items = _mapTmdbResults(movieResults, defaultType: MediaType.movie)
         ..addAll(_mapTmdbResults(tvResults, defaultType: MediaType.tvShow));
@@ -112,9 +140,14 @@ class ApiMediaRepository implements MediaRepository {
       // Ordena localmente os resultados combinados
       items = _sortItemsLocally(items, sortBy ?? 'popularity');
       return await _enrichWithDuration(items);
+    } else if (type == MediaType.tvShow) {
+      params['with_type'] = tvTypeFilter;
+      params['without_genres'] = '10766'; // Exclui Novela/Soap
+      final results = await _tmdbService.discover(type: 'tv', params: params);
+      final items = _mapTmdbResults(results, defaultType: type);
+      return await _enrichWithDuration(items);
     } else {
-      final typeStr = type == MediaType.tvShow ? 'tv' : 'movie';
-      final results = await _tmdbService.discover(type: typeStr, params: params);
+      final results = await _tmdbService.discover(type: 'movie', params: params);
       final items = _mapTmdbResults(results, defaultType: type);
       return await _enrichWithDuration(items);
     }
@@ -201,10 +234,20 @@ class ApiMediaRepository implements MediaRepository {
   @override
   Future<List<MediaItem>> getPopularMedia({MediaType? type}) async {
     try {
-      final typeStr = type == MediaType.tvShow ? 'tv' : 'movie';
-      final results = await _tmdbService.getPopular(type: typeStr);
-      final items = _mapTmdbResults(results, defaultType: type ?? MediaType.movie);
-      return await _enrichWithDuration(items);
+      if (type == MediaType.tvShow) {
+        // Usa discover para filtrar apenas seriados reais (sem noticiário, reality, talk show)
+        final results = await _tmdbService.discover(
+          type: 'tv',
+          params: {'sort_by': 'popularity.desc', 'with_type': '0|2|4'},
+        );
+        final items = _mapTmdbResults(results, defaultType: MediaType.tvShow);
+        return await _enrichWithDuration(items);
+      } else {
+        // Filmes: usa o endpoint popular padrão
+        final results = await _tmdbService.getPopular(type: 'movie');
+        final items = _mapTmdbResults(results, defaultType: MediaType.movie);
+        return await _enrichWithDuration(items);
+      }
     } catch (e) {
       print('Erro ao buscar populares: $e');
       return [];
@@ -253,7 +296,23 @@ class ApiMediaRepository implements MediaRepository {
           _genreIdToName[id] = name;
         }
       }
-      return genres.where((g) => g.isNotEmpty).toList();
+      // Gêneros que a API retorna em inglês com correspondente em português — removidos para evitar duplicata
+      const genresEmIngles = {
+        'Action & Adventure', // → Ação / Aventura
+        'News',               // → Documentário
+        'Reality',            // → sem correspondente direto, mas redundante
+        'Sci-Fi & Fantasy',   // → Ficção científica / Fantasia
+        'Soap',               // → Drama / Romance
+        'Talk',               // → sem correspondente, redundante
+        'War & Politics',     // → Guerra / História
+      };
+      final sorted = genres
+          .where((g) => g.isNotEmpty && !genresEmIngles.contains(g))
+          .toList()
+          ..sort();
+
+      // 'Nacionais' sempre aparece no topo como filtro especial
+      return ['Nacionais', ...sorted];
     } catch (e) {
       print('Erro ao buscar gêneros: $e');
       return [];
@@ -303,6 +362,7 @@ class ApiMediaRepository implements MediaRepository {
       streamingPlatforms: [], // Carregado apenas na tela de detalhes para economizar requisições
       seasonsCount: item['number_of_seasons'] as int?,
       duration: item['runtime'] != null ? '${item['runtime']} min' : null,
+      originalLanguage: item['original_language']?.toString(),
     );
   }
 

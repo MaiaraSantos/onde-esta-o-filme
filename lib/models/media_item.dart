@@ -60,6 +60,7 @@ class MediaItem {
   final double ratingTmdb;
   final List<StreamingPlatform> streamingPlatforms;
   final double popularity;
+  final String? originalLanguage; // Ex: 'pt' para produções brasileiras
 
   const MediaItem({
     required this.id,
@@ -77,6 +78,7 @@ class MediaItem {
     required this.ratingTmdb,
     required this.streamingPlatforms,
     required this.popularity,
+    this.originalLanguage,
   });
 
   // Getter para obter a nota principal a ser exibida, com fallback
@@ -106,6 +108,7 @@ class MediaItem {
               .toList() ??
           [],
       popularity: (json['popularity'] as num?)?.toDouble() ?? 0.0,
+      originalLanguage: json['original_language']?.toString(),
     );
   }
 
@@ -126,6 +129,7 @@ class MediaItem {
       'rating_tmdb': ratingTmdb,
       'streaming_platforms': streamingPlatforms.map((e) => e.toJson()).toList(),
       'popularity': popularity,
+      'original_language': originalLanguage,
     };
   }
 
@@ -145,6 +149,7 @@ class MediaItem {
     double? ratingTmdb,
     List<StreamingPlatform>? streamingPlatforms,
     double? popularity,
+    String? originalLanguage,
   }) {
     return MediaItem(
       id: id ?? this.id,
@@ -162,6 +167,7 @@ class MediaItem {
       ratingTmdb: ratingTmdb ?? this.ratingTmdb,
       streamingPlatforms: streamingPlatforms ?? this.streamingPlatforms,
       popularity: popularity ?? this.popularity,
+      originalLanguage: originalLanguage ?? this.originalLanguage,
     );
   }
 }
