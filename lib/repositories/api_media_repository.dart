@@ -20,18 +20,22 @@ class ApiMediaRepository implements MediaRepository {
   }
 
   Future<List<MediaItem>> _enrichWithDuration(List<MediaItem> items) async {
-    final enriched = await Future.wait(items.map((item) async {
-      try {
-        final typeStr = item.type == MediaType.tvShow ? 'tv' : 'movie';
-        final details = await _tmdbService.getDetails(item.id, typeStr);
-        return item.copyWith(
-          duration: details['runtime'] != null ? '${details['runtime']} min' : null,
-          seasonsCount: details['number_of_seasons'] as int?,
-        );
-      } catch (_) {
-        return item;
-      }
-    }));
+    final enriched = await Future.wait(
+      items.map((item) async {
+        try {
+          final typeStr = item.type == MediaType.tvShow ? 'tv' : 'movie';
+          final details = await _tmdbService.getDetails(item.id, typeStr);
+          return item.copyWith(
+            duration: details['runtime'] != null
+                ? '${details['runtime']} min'
+                : null,
+            seasonsCount: details['number_of_seasons'] as int?,
+          );
+        } catch (_) {
+          return item;
+        }
+      }),
+    );
     return enriched;
   }
 
@@ -59,11 +63,19 @@ class ApiMediaRepository implements MediaRepository {
       if (isNacionalSearch) {
         items = items.where((item) => item.originalLanguage == 'pt').toList();
       }
-      final genresSemNacionalSearch = genres?.where((g) => g != 'Nacionais').toList();
-      if (genresSemNacionalSearch != null && genresSemNacionalSearch.isNotEmpty) {
-        items = items.where((item) => genresSemNacionalSearch.every((g) => item.genres.contains(g))).toList();
+      final genresSemNacionalSearch = genres
+          ?.where((g) => g != 'Nacionais')
+          .toList();
+      if (genresSemNacionalSearch != null &&
+          genresSemNacionalSearch.isNotEmpty) {
+        items = items
+            .where(
+              (item) =>
+                  genresSemNacionalSearch.every((g) => item.genres.contains(g)),
+            )
+            .toList();
       }
-      
+
       // Ordenação local
       if (sortBy != null) {
         items = _sortItemsLocally(items, sortBy);
@@ -71,38 +83,46 @@ class ApiMediaRepository implements MediaRepository {
 
       return await _enrichWithDuration(items);
     }
-    
+
     // 2. Discover (Sem Busca por texto)
     final params = <String, String>{
       // Piso de qualidade: evita "sujeira" na listagem
       'vote_count.gte': '100',
       'vote_average.gte': '6.5',
     };
-    
+
     // Filtro especial: Nacionais (produções brasileiras)
     final isNacional = genres != null && genres.contains('Nacionais');
     if (isNacional) {
       params['with_origin_country'] = 'BR';
-      // Nacionais exige nota mínima maior para mostrar apenas produções relevantes
-      params['vote_average.gte'] = '7.0';
+      // Sem filtro de nota — deixa tudo aparecer
+      params.remove('vote_average.gte');
+      // Mínimo de votos para evitar títulos completamente desconhecidos
       params['vote_count.gte'] = '50';
+      // Ordena pelos mais bem avaliados
+      params['sort_by'] = 'vote_average.desc';
     }
 
     // Gêneros
     final genresSemNacional = genres?.where((g) => g != 'Nacionais').toList();
     if (genresSemNacional != null && genresSemNacional.isNotEmpty) {
-      final genreIds = genresSemNacional.map((g) => _genreNameToId[g]).where((id) => id != null).join(',');
+      final genreIds = genresSemNacional
+          .map((g) => _genreNameToId[g])
+          .where((id) => id != null)
+          .join(',');
       if (genreIds.isNotEmpty) {
         params['with_genres'] = genreIds;
       }
     }
-    
+
     // Streaming (Ignorar 'stremio' do TMDB)
-    if (streamingId != null && streamingId.isNotEmpty && streamingId != 'stremio') {
+    if (streamingId != null &&
+        streamingId.isNotEmpty &&
+        streamingId != 'stremio') {
       params['with_watch_providers'] = streamingId;
       params['watch_region'] = 'BR';
     }
-    
+
     // Sort
     if (sortBy != null) {
       switch (sortBy) {
@@ -117,7 +137,9 @@ class ApiMediaRepository implements MediaRepository {
           params['sort_by'] = 'primary_release_date.desc';
           break;
         case 'alphabetical':
-          params['sort_by'] = type == MediaType.tvShow ? 'name.asc' : 'title.asc';
+          params['sort_by'] = type == MediaType.tvShow
+              ? 'name.asc'
+              : 'title.asc';
           break;
       }
     }
@@ -126,28 +148,52 @@ class ApiMediaRepository implements MediaRepository {
     // without_genres=10766 exclui Soap/Novela
     const tvTypeFilter = '0|2|4';
 
+    // Sem filtros específicos: limita páginas para carregamento rápido.
+    // Com qualquer filtro ativo: busca tudo.
+    final hasActiveFilters = isNacional ||
+        (genres != null && genres.where((g) => g != 'Nacionais').isNotEmpty) ||
+        (streamingId != null && streamingId.isNotEmpty && streamingId != 'stremio') ||
+        type != null;
+    final maxPages = hasActiveFilters ? 500 : 5;
+
     if (type == null) {
       final tvParams = Map<String, String>.from(params)
         ..['with_type'] = tvTypeFilter
         ..['without_genres'] = '10766'; // Exclui Novela/Soap
 
-      final movieResults = await _tmdbService.discover(type: 'movie', params: params);
-      final tvResults = await _tmdbService.discover(type: 'tv', params: tvParams);
-      
+      final movieResults = await _tmdbService.discover(
+        type: 'movie',
+        params: params,
+        maxPages: maxPages,
+      );
+      final tvResults = await _tmdbService.discover(
+        type: 'tv',
+        params: tvParams,
+        maxPages: maxPages,
+      );
+
       var items = _mapTmdbResults(movieResults, defaultType: MediaType.movie)
         ..addAll(_mapTmdbResults(tvResults, defaultType: MediaType.tvShow));
-        
+
       // Ordena localmente os resultados combinados
       items = _sortItemsLocally(items, sortBy ?? 'popularity');
       return await _enrichWithDuration(items);
     } else if (type == MediaType.tvShow) {
       params['with_type'] = tvTypeFilter;
       params['without_genres'] = '10766'; // Exclui Novela/Soap
-      final results = await _tmdbService.discover(type: 'tv', params: params);
+      final results = await _tmdbService.discover(
+        type: 'tv',
+        params: params,
+        maxPages: maxPages,
+      );
       final items = _mapTmdbResults(results, defaultType: type);
       return await _enrichWithDuration(items);
     } else {
-      final results = await _tmdbService.discover(type: 'movie', params: params);
+      final results = await _tmdbService.discover(
+        type: 'movie',
+        params: params,
+        maxPages: maxPages,
+      );
       final items = _mapTmdbResults(results, defaultType: type);
       return await _enrichWithDuration(items);
     }
@@ -166,7 +212,9 @@ class ApiMediaRepository implements MediaRepository {
         list.sort((a, b) => b.year.compareTo(a.year));
         break;
       case 'alphabetical':
-        list.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+        list.sort(
+          (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+        );
         break;
     }
     return list;
@@ -178,11 +226,11 @@ class ApiMediaRepository implements MediaRepository {
       // Como não sabemos se é filme ou série apenas pelo ID no método genérico,
       // podemos tentar filme primeiro, ou assumir que o ID tem um prefixo.
       // Porém, no nosso modelo, salvamos o type na lista.
-      // O ideal é passar o type para o getMediaDetails, mas como a interface 
+      // O ideal é passar o type para o getMediaDetails, mas como a interface
       // tem apenas (String id), vamos buscar como filme. Se falhar, busca como série.
       Map<String, dynamic>? data;
       MediaType type = MediaType.movie;
-      
+
       try {
         data = await _tmdbService.getDetails(id, 'movie');
       } catch (_) {
@@ -196,7 +244,7 @@ class ApiMediaRepository implements MediaRepository {
 
       // Buscar streamings no Watchmode
       final streamings = await _watchmodeService.getStreamingSources(id, type);
-      
+
       // Criar lista de plataformas únicas (Watchmode pode retornar múltiplos links para a mesma plataforma)
       final uniqueStreamings = <String, StreamingPlatform>{};
       for (var s in streamings) {
@@ -207,15 +255,17 @@ class ApiMediaRepository implements MediaRepository {
       String? imdbId;
       if (data['imdb_id'] != null && data['imdb_id'].toString().isNotEmpty) {
         imdbId = data['imdb_id'];
-      } else if (data['external_ids'] != null && data['external_ids']['imdb_id'] != null && data['external_ids']['imdb_id'].toString().isNotEmpty) {
+      } else if (data['external_ids'] != null &&
+          data['external_ids']['imdb_id'] != null &&
+          data['external_ids']['imdb_id'].toString().isNotEmpty) {
         imdbId = data['external_ids']['imdb_id'];
       }
 
       if (imdbId != null) {
-        final stremioUrl = type == MediaType.movie 
+        final stremioUrl = type == MediaType.movie
             ? 'stremio:///detail/movie/$imdbId/$imdbId'
             : 'stremio:///detail/series/$imdbId/$imdbId:1:1';
-            
+
         uniqueStreamings['stremio'] = StreamingPlatform(
           id: 'stremio',
           name: 'Stremio',
@@ -224,7 +274,9 @@ class ApiMediaRepository implements MediaRepository {
         );
       }
 
-      return item.copyWith(streamingPlatforms: uniqueStreamings.values.toList());
+      return item.copyWith(
+        streamingPlatforms: uniqueStreamings.values.toList(),
+      );
     } catch (e) {
       print('Erro ao buscar detalhes do media: $e');
       return null;
@@ -264,7 +316,7 @@ class ApiMediaRepository implements MediaRepository {
       StreamingPlatform(id: '337', name: 'Disney+'),
       StreamingPlatform(id: '384', name: 'Max'),
       StreamingPlatform(
-        id: 'stremio', 
+        id: 'stremio',
         name: 'Stremio',
         logoUrl: 'https://www.stremio.com/website/stremio-logo-small.png',
       ),
@@ -276,7 +328,7 @@ class ApiMediaRepository implements MediaRepository {
     try {
       final movies = await _tmdbService.getGenres('movie');
       final tv = await _tmdbService.getGenres('tv');
-      
+
       final genres = <String>{};
       for (var g in movies) {
         final name = g['name']?.toString() ?? '';
@@ -299,17 +351,18 @@ class ApiMediaRepository implements MediaRepository {
       // Gêneros que a API retorna em inglês com correspondente em português — removidos para evitar duplicata
       const genresEmIngles = {
         'Action & Adventure', // → Ação / Aventura
-        'News',               // → Documentário
-        'Reality',            // → sem correspondente direto, mas redundante
-        'Sci-Fi & Fantasy',   // → Ficção científica / Fantasia
-        'Soap',               // → Drama / Romance
-        'Talk',               // → sem correspondente, redundante
-        'War & Politics',     // → Guerra / História
+        'News', // → Documentário
+        'Reality', // → sem correspondente direto, mas redundante
+        'Sci-Fi & Fantasy', // → Ficção científica / Fantasia
+        'Soap', // → Drama / Romance
+        'Talk', // → sem correspondente, redundante
+        'War & Politics', // → Guerra / História
       };
-      final sorted = genres
-          .where((g) => g.isNotEmpty && !genresEmIngles.contains(g))
-          .toList()
-          ..sort();
+      final sorted =
+          genres
+              .where((g) => g.isNotEmpty && !genresEmIngles.contains(g))
+              .toList()
+            ..sort();
 
       // 'Nacionais' sempre aparece no topo como filtro especial
       return ['Nacionais', ...sorted];
@@ -321,14 +374,19 @@ class ApiMediaRepository implements MediaRepository {
 
   // --- Funções Auxiliares ---
 
-  List<MediaItem> _mapTmdbResults(List<dynamic> results, {MediaType? defaultType}) {
+  List<MediaItem> _mapTmdbResults(
+    List<dynamic> results, {
+    MediaType? defaultType,
+  }) {
     return results
         .where((item) => item['media_type'] != 'person') // Filtra pessoas
         .map((item) {
           final typeStr = item['media_type'];
           final type = typeStr == 'tv'
               ? MediaType.tvShow
-              : (typeStr == 'movie' ? MediaType.movie : (defaultType ?? MediaType.movie));
+              : (typeStr == 'movie'
+                    ? MediaType.movie
+                    : (defaultType ?? MediaType.movie));
           return _mapTmdbItem(item, type);
         })
         .toList();
@@ -354,12 +412,17 @@ class ApiMediaRepository implements MediaRepository {
       year: _extractYear(item['release_date'] ?? item['first_air_date']),
       type: type,
       overview: item['overview']?.toString() ?? '',
-      posterPath: item['poster_path'] != null ? '${AppConfig.tmdbImageBaseUrl}/w500${item['poster_path']}' : null,
-      backdropPath: item['backdrop_path'] != null ? '${AppConfig.tmdbImageBaseUrl}/original${item['backdrop_path']}' : null,
+      posterPath: item['poster_path'] != null
+          ? '${AppConfig.tmdbImageBaseUrl}/w500${item['poster_path']}'
+          : null,
+      backdropPath: item['backdrop_path'] != null
+          ? '${AppConfig.tmdbImageBaseUrl}/original${item['backdrop_path']}'
+          : null,
       genres: mappedGenres,
       ratingTmdb: (item['vote_average'] as num?)?.toDouble() ?? 0.0,
       popularity: (item['popularity'] as num?)?.toDouble() ?? 0.0,
-      streamingPlatforms: [], // Carregado apenas na tela de detalhes para economizar requisições
+      streamingPlatforms:
+          [], // Carregado apenas na tela de detalhes para economizar requisições
       seasonsCount: item['number_of_seasons'] as int?,
       duration: item['runtime'] != null ? '${item['runtime']} min' : null,
       originalLanguage: item['original_language']?.toString(),
