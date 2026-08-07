@@ -370,4 +370,24 @@ class MockMediaRepository implements MediaRepository {
     }
     return genreSet.toList()..sort();
   }
+
+  @override
+  Future<({List<MediaItem> items, int totalPages})> searchMediaPaged({
+    String? query,
+    List<String>? genres,
+    String? streamingId,
+    MediaType? type,
+    String? sortBy,
+    required int page,
+  }) async {
+    // Mock tem dataset pequeno — retorna tudo em uma única página
+    final items = await searchMedia(
+      query: query,
+      genres: genres,
+      streamingId: streamingId,
+      type: type,
+      sortBy: sortBy,
+    );
+    return (items: items, totalPages: 1);
+  }
 }

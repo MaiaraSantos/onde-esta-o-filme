@@ -1,3 +1,4 @@
+import 'dart:math';
 import '../models/media_item.dart';
 import '../services/tmdb_api_service.dart';
 import '../services/watchmode_api_service.dart';
@@ -432,5 +433,122 @@ class ApiMediaRepository implements MediaRepository {
   int _extractYear(String? date) {
     if (date == null || date.length < 4) return 0;
     return int.tryParse(date.substring(0, 4)) ?? 0;
+  }
+
+  @override
+  Future<({List<MediaItem> items, int totalPages})> searchMediaPaged({
+    String? query,
+    List<String>? genres,
+    String? streamingId,
+    MediaType? type,
+    String? sortBy,
+    required int page,
+  }) async {
+    await _ensureGenresLoaded();
+
+    // --- Busca por texto ---
+    if (query != null && query.isNotEmpty) {
+      final result = await _tmdbService.searchPage(query, page: page);
+      var items = _mapTmdbResults(result.results);
+
+      if (type != null) {
+        items = items.where((item) => item.type == type).toList();
+      }
+      final isNacionalSearch = genres != null && genres.contains('Nacionais');
+      if (isNacionalSearch) {
+        items = items.where((item) => item.originalLanguage == 'pt').toList();
+      }
+      final genresSemNacional = genres?.where((g) => g != 'Nacionais').toList();
+      if (genresSemNacional != null && genresSemNacional.isNotEmpty) {
+        items = items
+            .where((item) => genresSemNacional.every((g) => item.genres.contains(g)))
+            .toList();
+      }
+      if (sortBy != null) items = _sortItemsLocally(items, sortBy);
+
+      final enriched = await _enrichWithDuration(items);
+      return (items: enriched, totalPages: result.totalPages);
+    }
+
+    // --- Discover (sem busca por texto) ---
+    final params = <String, String>{
+      'vote_count.gte': '100',
+      'vote_average.gte': '6.5',
+    };
+
+    final isNacional = genres != null && genres.contains('Nacionais');
+    if (isNacional) {
+      params['with_origin_country'] = 'BR';
+      params.remove('vote_average.gte');
+      params.remove('vote_count.gte');
+      params['sort_by'] = 'vote_average.desc';
+    }
+
+    final genresSemNacional = genres?.where((g) => g != 'Nacionais').toList();
+    if (genresSemNacional != null && genresSemNacional.isNotEmpty) {
+      final genreIds = genresSemNacional
+          .map((g) => _genreNameToId[g])
+          .where((id) => id != null)
+          .join(',');
+      if (genreIds.isNotEmpty) params['with_genres'] = genreIds;
+    }
+
+    if (streamingId != null && streamingId.isNotEmpty && streamingId != 'stremio') {
+      params['with_watch_providers'] = streamingId;
+      params['watch_region'] = 'BR';
+    }
+
+    if (sortBy != null && !isNacional) {
+      switch (sortBy) {
+        case 'popularity':
+          params['sort_by'] = 'popularity.desc';
+          break;
+        case 'rating':
+          params['sort_by'] = 'vote_average.desc';
+          params['vote_count.gte'] = '100';
+          break;
+        case 'date':
+          params['sort_by'] = 'primary_release_date.desc';
+          break;
+        case 'alphabetical':
+          params['sort_by'] = type == MediaType.tvShow ? 'name.asc' : 'title.asc';
+          break;
+      }
+    }
+
+    const tvTypeFilter = '0|2|4';
+
+    if (type == null) {
+      final tvParams = Map<String, String>.from(params)
+        ..['with_type'] = tvTypeFilter
+        ..['without_genres'] = '10766';
+
+      final movieResult = await _tmdbService.discoverPage(
+        type: 'movie', params: params, page: page);
+      final tvResult = await _tmdbService.discoverPage(
+        type: 'tv', params: tvParams, page: page);
+
+      var items = _mapTmdbResults(movieResult.results, defaultType: MediaType.movie)
+        ..addAll(_mapTmdbResults(tvResult.results, defaultType: MediaType.tvShow));
+      items = _sortItemsLocally(items, sortBy ?? 'popularity');
+
+      final totalPages = max(movieResult.totalPages, tvResult.totalPages);
+      final enriched = await _enrichWithDuration(items);
+      return (items: enriched, totalPages: totalPages);
+    } else if (type == MediaType.tvShow) {
+      params['with_type'] = tvTypeFilter;
+      params['without_genres'] = '10766';
+      final result = await _tmdbService.discoverPage(
+        type: 'tv', params: params, page: page);
+      final items = _mapTmdbResults(result.results, defaultType: type);
+      final enriched = await _enrichWithDuration(items);
+      return (items: enriched, totalPages: result.totalPages);
+    } else {
+      final result = await _tmdbService.discoverPage(
+        type: 'movie', params: params, page: page);
+      final items = _mapTmdbResults(result.results, defaultType: type);
+      final enriched = await _enrichWithDuration(items);
+      return (items: enriched, totalPages: result.totalPages);
+    }
   }
 }

@@ -74,6 +74,18 @@ class TmdbApiService {
     return _getAll('/search/multi', queryParams: {'query': query}, maxPages: maxPages);
   }
 
+  /// Busca uma única página — usado para infinite scroll
+  Future<({List<dynamic> results, int totalPages})> searchPage(
+    String query, {
+    required int page,
+  }) async {
+    final data = await _get('/search/multi', queryParams: {'query': query, 'page': '$page'});
+    return (
+      results: List<dynamic>.from(data['results'] ?? []),
+      totalPages: (data['total_pages'] as num?)?.toInt() ?? 1,
+    );
+  }
+
   Future<Map<String, dynamic>> getDetails(String id, String type) async {
     final data = await _get('/$type/$id', queryParams: {'append_to_response': 'external_ids'});
     return data;
@@ -90,5 +102,21 @@ class TmdbApiService {
     int maxPages = 500,
   }) async {
     return _getAll('/discover/$type', queryParams: params, maxPages: maxPages);
+  }
+
+  /// Busca uma única página do discover — usado para infinite scroll
+  Future<({List<dynamic> results, int totalPages})> discoverPage({
+    String type = 'movie',
+    Map<String, String>? params,
+    required int page,
+  }) async {
+    final data = await _get('/discover/$type', queryParams: {
+      if (params != null) ...params,
+      'page': '$page',
+    });
+    return (
+      results: List<dynamic>.from(data['results'] ?? []),
+      totalPages: (data['total_pages'] as num?)?.toInt() ?? 1,
+    );
   }
 }

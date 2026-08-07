@@ -10,6 +10,16 @@ abstract class MediaRepository {
     String? sortBy, // 'popularity', 'rating', 'date', 'alphabetical'
   });
 
+  /// Busca paginada — retorna uma página de resultados + total de páginas (para infinite scroll)
+  Future<({List<MediaItem> items, int totalPages})> searchMediaPaged({
+    String? query,
+    List<String>? genres,
+    String? streamingId,
+    MediaType? type,
+    String? sortBy,
+    required int page,
+  });
+
   /// Busca os detalhes de um título específico por ID
   Future<MediaItem?> getMediaDetails(String id);
 

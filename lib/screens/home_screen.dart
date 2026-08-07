@@ -37,10 +37,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _currentTab = 0; // 0 = Início, 1 = Descobrir, 2 = Quero Assistir
   final TextEditingController _topSearchController = TextEditingController();
   bool _isFilterExpanded = true;
+  final ScrollController _discoverScrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
+    // Listener de scroll para infinite scroll
+    _discoverScrollController.addListener(_onDiscoverScroll);
     // Preenche filtros iniciais se vierem pela URL
     WidgetsBinding.instance.addPostFrameCallback((_) {
       bool hasInitialFilters = false;
@@ -79,7 +82,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void dispose() {
     _topSearchController.dispose();
+    _discoverScrollController.dispose();
     super.dispose();
+  }
+
+  void _onDiscoverScroll() {
+    final position = _discoverScrollController.position;
+    // Carrega mais quando estiver a 300px do fundo
+    if (position.pixels >= position.maxScrollExtent - 300) {
+      ref.read(paginatedSearchProvider.notifier).loadMore();
+    }
   }
 
   void _onSearchSubmitted(String query) {
@@ -769,7 +781,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ABA 1: DESCOBRIR (FILTROS LATERAIS E GRID DE RESULTADOS)
   // ==========================================
   Widget _buildDiscoverTab(BuildContext context) {
-    final searchResults = ref.watch(searchResultsProvider);
+    final searchState = ref.watch(paginatedSearchProvider);
     final size = MediaQuery.of(context).size;
     final isDesktop = size.width > 950;
     final watchlist = ref.watch(watchlistProvider);
@@ -835,23 +847,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        searchResults.when(
-                          data: (items) => Text(
-                            '${items.length} título(s) encontrado(s)',
+                        if (searchState.isLoading)
+                          const Text(
+                            'Buscando...',
+                            style: TextStyle(color: Colors.white54),
+                          )
+                        else
+                          Text(
+                            '${searchState.items.length}${searchState.hasMore ? '+' : ''} título(s) encontrado(s)',
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 15,
                             ),
                           ),
-                          loading: () => const Text(
-                            'Buscando...',
-                            style: TextStyle(color: Colors.white54),
-                          ),
-                          error: (_, __) => const Text(
-                            'Erro na pesquisa',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
 
                         // Botão para abrir filtros em telas menores (BottomSheet/Modal)
                         if (!isPanelPinned)
@@ -868,38 +876,51 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
                   // Grid de Resultados
                   Expanded(
-                    child: searchResults.when(
-                      data: (items) {
-                        if (items.isEmpty) {
-                          return const EmptyState();
-                        }
-                        return GridView.builder(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 16,
-                          ),
-                          gridDelegate:
-                              const SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: 220,
-                                childAspectRatio: 170 / 350,
-                                crossAxisSpacing: 16,
-                                mainAxisSpacing: 16,
-                              ),
-                          itemCount: items.length,
-                          itemBuilder: (context, index) {
-                            return MovieCard(item: items[index]);
-                          },
-                        );
-                      },
-                      loading: () => const Padding(
-                        padding: EdgeInsets.all(24.0),
-                        child: LoadingWidget(),
-                      ),
-                      error: (err, _) => ErrorState(
-                        message: 'Falha na requisição: ${err.toString()}',
-                        onRetry: () => ref.refresh(searchResultsProvider),
-                      ),
-                    ),
+                    child: searchState.isLoading
+                        ? const Padding(
+                            padding: EdgeInsets.all(24.0),
+                            child: LoadingWidget(),
+                          )
+                        : searchState.error != null
+                            ? ErrorState(
+                                message: 'Falha na requisição: ${searchState.error}',
+                                onRetry: () => ref
+                                    .read(paginatedSearchProvider.notifier)
+                                    .loadMore(),
+                              )
+                            : searchState.items.isEmpty
+                                ? const EmptyState()
+                                : GridView.builder(
+                                    controller: _discoverScrollController,
+                                    padding: const EdgeInsets.only(
+                                      left: 24,
+                                      right: 24,
+                                      top: 16,
+                                      bottom: 80, // espaço para o loading indicator
+                                    ),
+                                    gridDelegate:
+                                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                                          maxCrossAxisExtent: 220,
+                                          childAspectRatio: 170 / 350,
+                                          crossAxisSpacing: 16,
+                                          mainAxisSpacing: 16,
+                                        ),
+                                    // +1 para o item de loading no fundo quando isLoadingMore
+                                    itemCount: searchState.items.length +
+                                        (searchState.isLoadingMore ? 1 : 0),
+                                    itemBuilder: (context, index) {
+                                      if (index == searchState.items.length) {
+                                        // Loading spinner no fundo
+                                        return const Center(
+                                          child: Padding(
+                                            padding: EdgeInsets.all(16),
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          ),
+                                        );
+                                      }
+                                      return MovieCard(item: searchState.items[index]);
+                                    },
+                                  ),
                   ),
                 ],
               ),
