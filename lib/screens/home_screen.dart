@@ -235,23 +235,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           const SizedBox(width: 16),
 
-            // Botão Quero Assistir no topo no Mobile/Tablet (Apenas atalho rápido)
-          if (!isDesktop) ...[
-            IconButton(
-              icon: Badge(
-                label: Text('$watchlistCount'),
-                isLabelVisible: watchlistCount > 0,
-                child: const Icon(Icons.bookmark_rounded),
-              ),
-              onPressed: () {
-                setState(() {
-                  _currentTab = 2; // Vai para a Watchlist
-                });
-              },
-            ),
-            const SizedBox(width: 8),
-          ],
-          
           // Botão de Perfil/Login com Google
           Consumer(
             builder: (context, ref, child) {
